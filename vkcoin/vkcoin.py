@@ -144,13 +144,13 @@ class VKCoinApi:
                 msg = c_sock.recv(1024).decode('utf-8')
                 if not msg:
                     c_sock.close()
-                c_sock.send(b'HTTP/1.1 200 OK\n')
-                try:
-                    data = Entity()
-                    data.__dict__ = json.loads(msg.split('\r\n\r\n')[-1])
-                except json.JSONDecodeError:
-                    c_sock.close()
-                    break
+                elif:
+                    c_sock.sendall(b'HTTP/1.1 200 OK\n')
+                    try:
+                        data = Entity()
+                        data.__dict__ = json.loads(msg.split('\r\n\r\n')[-1])
+                    except json.JSONDecodeError:
+                        c_sock.close()
                 self.handler(data)
     
     def cb_handler(self, func):
