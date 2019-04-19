@@ -3,6 +3,7 @@ import time
 from threading import Thread
 from random import randint
 import json
+import socket
 
 try:
     from websocket import create_connection
@@ -38,7 +39,7 @@ class VKCoinWS(Thread):
             self.iframe_link = api.apps.get(app_id=6915965)['items'][0]['mobile_iframe_url']
             self.ws_link = self._create_ws_link()
         self.start()
-
+    
     def _create_ws_link(self):
         user_id = int(self.iframe_link.split('user_id=')[-1].split('&')[0])
         ch = user_id % 32
@@ -63,7 +64,7 @@ class VKCoinWS(Thread):
                 else:
                     print('WebSocket окончательно закрыт')
                     return
-
+    
     def _message_handler(self, msg):
         if msg.startswith('TR'):
             amount, user_from, trans = msg.split()[1:]
@@ -73,15 +74,14 @@ class VKCoinWS(Thread):
                 print(f'Текущий баланс: {self.score/1000}')
             if self.handler:
                 data = Entity()
-                data.__dict__ = {'user_id': self.user_id, 'balance': self.score, 'user_from': user_from,
-                                 'amount': amount}
+                data.__dict__ = {'user_id': self.user_id, 'balance': self.score, 'user_from': user_from, 'amount': amount}
                 self.handler_f(data)
         elif len(msg) > 50000:
             msg = json.loads(msg)
             self.score = msg['score']
             if self.notify:
                 print('Баланс', msg['score'] / 1000)
-
+    
     def handler(self, func):
         self.handler_f = func
         return func
@@ -92,11 +92,12 @@ class VKCoinApi:
         self.link = 'https://coin-without-bugs.vkforms.ru/merchant/'
         self.user_id = user_id
         self.key = key
-
+        self.reg_endpoint = False
+    
     def send_coins(self, to_id, amount):
         data = {'merchantId': self.user_id, 'key': self.key, 'toId': to_id, 'amount': amount}
         return requests.post(self.link + 'send', json=data).json()
-
+    
     def get_payment_url(self, amount, payload=None, free_amount=False):
         if not payload:
             payload = randint(-2e9, 2e9)
@@ -111,10 +112,47 @@ class VKCoinApi:
     def get_transactions(self, tx):
         data = {'merchantId': self.user_id, 'key': self.key, 'tx': tx}
         return requests.post(self.link + 'th', json=data).json()
-
+    
     def get_user_balance(self, *users):
         data = {'merchantId': self.user_id, 'key': self.key, 'userIds': users}
         return requests.post(self.link + 'score', json=data).json()
-
+    
     def get_my_balance(self):
         return self.get_user_balance(self.user_id)
+    
+    def set_callback_endpoint(self, address=None, port=80):
+        if not address:
+            address = 'http://' + socket.gethostbyname(socket.gethostname())
+            address += ':' + str(port)
+        self.reg_endpoint = True
+        data = {'merchantId': self.user_id, 'key': self.key, 'callback': address}
+        return requests.post(self.link + 'set', json=data).json()
+    
+    def remove_callback_endpoint(self):
+        data = {'merchantId': self.user_id, 'key': self.key, 'callback': None}
+        return requests.post(self.link + 'set', json=data).json()
+    
+    def callback_start(self):
+        if not self.reg_endpoint:
+            self.set_callback_endpoint()
+        sock = socket.socket()
+        sock.bind(('', 80))
+        sock.listen(1)
+        while True:
+            c_sock, addr = sock.accept()
+            while True:
+                msg = c_sock.recv(1024).decode('utf-8')
+                if not msg:
+                    c_sock.close()
+                c_sock.send(b'HTTP/1.1 200 OK\n')
+                try:
+                    data = Entity()
+                    data.__dict__ = json.loads(msg.split('\r\n\r\n')[-1])
+                except json.JSONDecodeError:
+                    c_sock.close()
+                    break
+                self.handler(data)
+    
+    def cb_handler(self, func):
+        self.handler = func
+        return func
